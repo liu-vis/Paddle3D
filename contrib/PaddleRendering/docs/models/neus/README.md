@@ -1,4 +1,4 @@
-# NeRF: Scenes as Neural Radiance Fields for View Synthesis
+# NeuS: Learning Neural Implicit Surfaces by Volume Rendering for Multi-view Reconstruction
 
 ## 目录
 
@@ -110,5 +110,5 @@ python tools/evaluate.py \
 |:---------------|:-------------------------------|:------|:------|
 | config         | 配置文件                           | 是     | -     |
 | model          | 待评估模型路径                        | 是     | -     |
-| ray_batch_size | 光线 mini-batch 大小               | 否     | 16384 |
+| ray_batch_size | 光线 mini-batch 大小               | 否     | 256 |
 | num_workers    | 用于异步读取数据的进程数量， 大于等于1时开启子进程读取数据 | 否     | 0     |
