@@ -34,7 +34,8 @@ def training_step(model: paddle.nn.Layer,
                   cur_iter: int,
                   sample: Tuple[RayBundle, dict],
                   scaler=None,
-                  grad_accum_cfg=None) -> dict:
+                  grad_accum_cfg=None,
+                  iter_size: int  = None) -> dict:
     model.train()
 
     if isinstance(model, paddle.DataParallel) and getattr(
@@ -49,13 +50,43 @@ def training_step(model: paddle.nn.Layer,
                 loss.backward()
         fused_allreduce_gradients(list(model.parameters()), None)
     else:
-        outputs = model(sample, cur_iter=cur_iter)
-        loss = parse_losses(outputs['loss'])
-        if scaler is not None:
-            scaled_loss = scaler.scale(loss)
-            scaled_loss.backward()
+        if iter_size is not None:
+            assert(iter_size > 0) # iter_size must be larger than zero.
+            if isinstance(sample, list):
+                ray_bundle, pixel_batch = sample
+            else:
+                ray_bundle = sample
+            assert(iter_size <= len(ray_bundle)) # iter_size must be smaller than # of rays.
+            for t in range(0, len(ray_bundle), iter_size):
+                sub_bch_bundle = ray_bundle[t:t + iter_size]
+                if isinstance(sample, list):
+                    sub_bch_pixel = pixel_batch[t:t + iter_size]
+                    sub_sample = [sub_bch_bundle, sub_bch_pixel]
+                else:
+                    sub_sample = sub_bch_bundle
+                outputs = model(sample, sub_sample, cur_iter, t)
+                loss = parse_losses(outputs['loss'])
+
+                # Backward loss
+                if scaler is not None:
+                    scaled_loss = scaler.scale(loss)
+                    scaled_loss.backward()
+                else:
+                    loss.backward()
         else:
-            loss.backward()
+            outputs = model(sample, cur_iter=cur_iter)
+            loss = parse_losses(outputs['loss'])
+
+            # Backward loss
+            if scaler is not None:
+                scaled_loss = scaler.scale(loss)
+                scaled_loss.backward()
+            else:
+                loss.backward()
+
+
+
+
 
     if grad_accum_cfg is None or (
             grad_accum_cfg is not None

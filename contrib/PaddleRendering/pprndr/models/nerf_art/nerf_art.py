@@ -36,6 +36,8 @@ class NeRFART(nn.Layer):
     def __init__(self,
                  recon_model: nn.Layer,
                  style_model: nn.Layer,
+                 image_width: int,
+                 image_height: int,
                  window_size: int = 256,
                  loss_weight_eikonal: float = 1.0,
                  loss_weight_clip: float = 1.0,
@@ -46,20 +48,95 @@ class NeRFART(nn.Layer):
                  loss_weight_idr: float = 1.0,
                  loss_weight_mask: float = 1.0,
                  anneal_end: float = 0.0):
+        self.recon_model = recon_model
+        self.recon_model.eval() 
+        self.style_model = style_model
+
+        self.im_width = image_width
+        self.im_height = image_height
         self.window_size = window_size
+        self.style_grads = None
         super(NeRFART, self).__init__()
 
-    def _forward_art(self, sample):
-        # Step1: Inference by neus
-        if self.training:
-            ray_bundle, pixel_batch = sample
-        else:
-            ray_bundle = sample
+    def generate_style_grads(self, ray_bundle):
+        # Get the number of rays
+        num_rays = len(ray_bundle) # (= the # of pixels of an entire image)
 
-        num_rays = len(ray_bundle)
-        for b_id in range(0, num_rays, self.window_size):
-            cur_ray_bundle = ray_bundle[b_id:b_id + window_size]
-            outputs = model(cur_ray_bundle)
+        # Generate recon_image and style_image
+        with paddle.no_grad():
+            # Step1: Inference by the reconstruction model in eval mode
+            temp_recon_outputs = defaultdict(list)
+            for b_id in range(0, num_rays, self.window_size):
+                cur_ray_bundle = ray_bundle[b_id:b_id + window_size]
+                outputs = self.recon_model(cur_ray_bundle)
+                for k, v in outputs.items():
+                    temp_recon_outputs[k].append(v)
+
+            recon_outputs = {} # image, gradients
+            for k, v in temp_recon_outputs.items():
+                if isinstance(v[0], paddle.Tensor):
+                    recon_outputs[k] = paddle.concat(v, axis=0)
+                else:
+                    recon_outputs[k] = v
+            recon_image = recon_outputs['rgb'].reshape([-1, self.im_height, self.im_width, 3])
+            recon_image = recon_image.transpose([0, 3, 1, 2])
+            
+            # Step2: Inference by the stylization model in eval mode
+            self.style_model.eval()
+            temp_style_outputs = defaultdict(list)
+            for b_id in range(0, num_rays, self.window_size):
+                cur_ray_bundle = ray_bundle[b_id:b_id + window_size]
+                outputs = self.style_model(cur_ray_bundle) 
+                for k, v in outputs.items():
+                    temp_style_outputs[k].append(v)
+                    
+            style_outputs = {} # image, gradients
+            for k, v in temp_style_outputs.items():
+                if isinstance(v[0], paddle.Tensor):
+                    style_outputs[k] = paddle.concat(v, axis=0)
+                else:
+                    style_output[k] = v
+            style_image = style_outputs['rgb'].reshape([-1, self.im_height, self.im_width, 3])
+            style_image = style_image.transpose([0, 3, 1, 2])
+            style_image = style_image.detach() # Not sure if this is necessary.
+
+        self.style_image.stop_gradient = False
+        
+        #---------- Until grad is computed. record it
+        
+
+        
+
+    def _forward_art(self, 
+                     sample, 
+                     sub_sample = None, 
+                     cur_iter = None, 
+                     cur_sub_iter = None):
+        if self.training:
+            assert(sub_sample is not None)
+            ray_bundle, pixel_batch = sample # For the entire image
+            sub_ray_bundle, sub_pixel_batch = sub_sample # For the sub_batch
+        else:
+            ray_bundle = sample # For the entire image
+
+        if cur_sub_iter == 0 and self.training:
+            # Generate image level grads.
+            self.style_grads = self.generate_images(ray_bundle)
+
+        
+                       
+
+        # ---- Already have sty_image and recon_image w/o graph. Do later loss, than, redo forward in train() model. Then backward all loss in patch level
+                
+
+        
+        
+        
+        
+        
+        
+
+            
 
 
     def forward(self, *args, **kwargs):
