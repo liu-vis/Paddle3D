@@ -28,6 +28,14 @@ def parse_losses(losses: Union[Dict[str, paddle.Tensor], paddle.Tensor]
     elif isinstance(losses, dict):
         return sum(losses.values())
 
+def parse_addtional_grads(grad_back: Dict[str, list]):
+    tensors = []
+    grads = []
+    for tensor_grad in grad_back.values():
+        # tensor_grad = [tensor, grad]
+        tensors.append(tensor_grad[0])
+        grads.append(tensor_grad[1])
+    return tensors, grads
 
 def training_step(model: paddle.nn.Layer,
                   optimizer: paddle.optimizer.Optimizer,
@@ -73,6 +81,12 @@ def training_step(model: paddle.nn.Layer,
                     scaled_loss.backward()
                 else:
                     loss.backward()
+
+                # Backward additional grad. if they exist.
+                tensors, grads = parse_addtional_grads(outputs['grad_back'])
+                for tensor, grad in zip(tensors, grads):
+                    tensor.backward(grad)
+
         else:
             outputs = model(sample, cur_iter=cur_iter)
             loss = parse_losses(outputs['loss'])
@@ -83,9 +97,6 @@ def training_step(model: paddle.nn.Layer,
                 scaled_loss.backward()
             else:
                 loss.backward()
-
-
-
 
 
     if grad_accum_cfg is None or (
